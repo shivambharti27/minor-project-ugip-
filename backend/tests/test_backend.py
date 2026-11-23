@@ -55,6 +55,7 @@ def test_projects_crud():
     assert client.post("/api/projects", json={**p, "facing": "X"}).status_code == 422
 
 
-def test_chat_without_key_is_friendly():
+def test_chat_without_key_is_friendly(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     r = client.post("/api/chat", json={"question": "Slab kitni moti honi chahiye?"}).json()
     assert r["ok"] is False and "GEMINI_API_KEY" in r["reply"]

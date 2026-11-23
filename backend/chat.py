@@ -19,7 +19,6 @@ def build_prompt(question, plan):
                f"{plan.get('facing')}-facing, about {plan.get('area')} sq ft, {plan.get('summary', '')}.\n\n")
     return ctx + "Question: " + question
 
-
 def ask(question, plan=None, history=None):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
@@ -32,8 +31,18 @@ def ask(question, plan=None, history=None):
         for m in (history or [])[-6:]:
             contents.append(types.Content(role="user" if m.get("role") == "user" else "model", parts=[types.Part(text=str(m.get("text", ""))[:2000])]))
         contents.append(types.Content(role="user", parts=[types.Part(text=build_prompt(question, plan))]))
-        res = client.models.generate_content(model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"), contents=contents,
-                                             config=types.GenerateContentConfig(system_instruction=SYSTEM, max_output_tokens=700))
-        return {"ok": True, "reply": (res.text or "").strip() or "I could not generate an answer. Please try again."}
+        # If one model is busy (503) or missing, try the next one instead of failing.
+        first = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+        last_err = None
+        for name in dict.fromkeys([first, "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-2.5-flash"]):
+            try:
+                res = client.models.generate_content(model=name, contents=contents,
+                                                     config=types.GenerateContentConfig(system_instruction=SYSTEM, max_output_tokens=700))
+                return {"ok": True, "reply": (res.text or "").strip() or "I could not generate an answer. Please try again."}
+            except Exception as e:
+                last_err = e
+                print("GEMINI model", name, "failed:", repr(e)[:300])
+        raise last_err
     except Exception as e:  # network, quota, wrong model name, bad key...
+        print("GEMINI ERROR:", repr(e)[:600])
         return {"ok": False, "reply": f"The AI service returned an error ({type(e).__name__}). Check the API key and GEMINI_MODEL in backend/.env."}
