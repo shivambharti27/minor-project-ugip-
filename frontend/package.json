@@ -1,0 +1,20 @@
+{
+  "name": "ghar-ai-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "check": "node tests/full-check.js"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "three": "0.128.0"
+  }
+}
