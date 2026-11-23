@@ -42,15 +42,18 @@ export function measurePlan(layout, doors) {
   const windows = [];
   built.forEach(l => { if (l.room.exterior) { const a = l.rect.w * l.rect.h; windows.push(isBath(l.room.name) ? { w: 2, h: 2 } : { w: a > 150 ? 5 : 4, h: 4 }); } });
   const winArea = windows.reduce((a, w) => a + w.w * w.h, 0);
-  const wetRooms = built.filter(l => isBath(l.room.name));
-  const kitchens = built.filter(l => /kitchen/i.test(l.room.name));
-  return { built, builtArea, extLen: ext, intLen: int, bathDoors, flushDoors, mainDoors: hasMain, windows, winArea, wetRooms, kitchens };
+  const info = l => ({ area: l.rect.w * l.rect.h, per: 2 * (l.rect.w + l.rect.h) });
+  const wetRooms = built.filter(l => isBath(l.room.name)).map(info);
+  const kitchens = built.filter(l => /kitchen/i.test(l.room.name)).map(info);
+  return { builtArea, extLen: ext, intLen: int, bathDoors, flushDoors, mainDoors: hasMain, windows, winArea, wetRooms, kitchens };
 }
 
-export function estimate(layout, doors, options = {}) {
+export function estimate(layout, doors, options = {}) { return estimateFromMeasurements(measurePlan(layout, doors), options); }
+
+// g = plain measurements: { builtArea, extLen, intLen, bathDoors, flushDoors, mainDoors, windows:[{w,h}], winArea, wetRooms:[{area,per}], kitchens:[{area,per}] }
+export function estimateFromMeasurements(g, options = {}) {
   const o = { ...DEFAULTS, ...options };
   const R = ratesFor(o.grade, options.rates);
-  const g = measurePlan(layout, doors);
   const F = o.floors, H = o.storeyHeightFt;
   const doorA = { main: 4 * 7, flush: 3 * 7, bath: 2.5 * 7 };
   const intDoorA = g.flushDoors * doorA.flush + g.bathDoors * doorA.bath, mainA = g.mainDoors * doorA.main;
@@ -91,12 +94,11 @@ export function estimate(layout, doors, options = {}) {
   work('Plastering (internal, external, ceiling)', (plIn + plOut + ceil).toFixed(0) + ' sq ft', { cement: p1.cement + p2.cement + p3.cement, sand: p1.sand + p2.sand + p3.sand });
 
   // ---- flooring & tiles
-  const roomArea = g.built.reduce((a, l) => a + l.rect.w * l.rect.h, 0) * F;
-  const bathFloor = g.wetRooms.reduce((a, l) => a + l.rect.w * l.rect.h, 0) * F;
+  const roomArea = g.builtArea * F;
+  const bathFloor = g.wetRooms.reduce((a, l) => a + l.area, 0) * F;
   const dryFloor = roomArea - bathFloor;
-  const per = l => 2 * (l.rect.w + l.rect.h);
-  const bathWall = g.wetRooms.reduce((a, l) => a + Math.max(0, per(l) - 2.5) * 7, 0) * F;
-  const kitWall = g.kitchens.reduce((a, l) => a + Math.max(0, per(l) - 3) * 2.5, 0) * F;
+  const bathWall = g.wetRooms.reduce((a, l) => a + Math.max(0, l.per - 2.5) * 7, 0) * F;
+  const kitWall = g.kitchens.reduce((a, l) => a + Math.max(0, l.per - 3) * 2.5, 0) * F;
   const bed = mortar(roomArea * t.bed * M3, 4);
   work('Flooring & wall tiles', roomArea.toFixed(0) + ' sq ft floor', { cement: bed.cement, sand: bed.sand }, { tiles: { dry: dryFloor * 1.07, bath: bathFloor * 1.07, wall: (bathWall + kitWall) * 1.07 } });
 

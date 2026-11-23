@@ -7,6 +7,7 @@ import { initThreeIfNeeded, render3D, resizeThree } from './render/render3d.js';
 // ORCHESTRATION
 // =========================================================
 import { current, addProject, thumbSVG } from './state.js';
+import { api } from './api.js';
 import './styles/app.css';
 import { route, startRouter } from './router.js';
 import * as pages from './pages/index.js';
@@ -124,9 +125,11 @@ export function initDesigner() {
   on('tab2dBtn', 'click', () => switchTab('2d'));
   on('tab3dBtn', 'click', () => switchTab('3d'));
   on('showRoofInput', 'change', generateLayout);
-  on('saveBtn', 'click', () => {
+  on('saveBtn', 'click', async () => {
     const pl = current.plan; if (!pl || pl.layout.issues.length) return;
-    addProject({ length: current.length, width: current.width, facing: current.facing, bhk: pl.config.bhk, villa: !!pl.config.villa, thumb: thumbSVG(pl.layout, current.length, current.width) });
+    const rec = { length: current.length, width: current.width, facing: current.facing, bhk: pl.config.bhk || 0, villa: !!pl.config.villa, thumb: thumbSVG(pl.layout, current.length, current.width) };
+    try { await api.addProject({ name: (rec.villa ? 'Villa ' : (rec.bhk + ' BHK home ')) + rec.length + '×' + rec.width, ...rec }); }
+    catch { addProject(rec); }   // backend not running: keep it in this browser instead
     $('saveBtn').textContent = '✓ Saved';
   });
   ['lengthInput', 'widthInput'].forEach(id => on(id, 'input', generateLayoutSoon));

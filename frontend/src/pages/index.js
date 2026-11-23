@@ -2,6 +2,7 @@ import { initDesigner } from '../main.js';
 import { current, loadProjects, removeProject, ago } from '../state.js';
 import { drawHouse } from '../ui/house.js';
 import { page as estimate } from './estimate.js';
+import { api } from '../api.js';
 
 // ---------- Home ----------
 const ico = d => `<i><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#231A15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg></i>`;
@@ -51,17 +52,40 @@ const design = { html: () => `<div class="wrap page"><h1 class="ptitle">Design y
 <div id="invalidView" class="invalid" style="display:none"></div></section>
 <aside class="side-r"><div class="info" id="roomInfo"></div><div class="rooms" id="roomList"></div></aside></div></div>`, mount: () => initDesigner() };
 
-// ---------- Coming soon ----------
-const soon = (title, text) => ({ html: () => `<div class="wrap"><div class="soon"><span class="pill">Coming soon</span><h2>${title}</h2><p>${text}</p><a class="btn" href="#/design">Go to Design</a></div></div>` });
-const assistant = soon('Civil assistant', 'An AI assistant for civil-engineering questions will be added in a later phase.');
+// ---------- Assistant ----------
+const ASKS = ['Foundation kitni gehri honi chahiye?', 'Beam aur column ka size kaise tay hota hai?', 'Naksha pass karane ke liye kya chahiye?'];
+const assistant = { html: () => `<div class="wrap page"><h1 class="ptitle">Civil assistant</h1><p class="psub">Ask about foundations, slabs, bricks, approvals and costs. General guidance only: confirm structure with an engineer.</p>
+<div class="chat"><section class="chatbox"><div class="msgs" id="msgs"><div class="bubble bot">Namaste! Ghar banane se jude sawal poochiye.</div></div>
+<form class="composer" id="chatForm"><label for="msg" hidden>Message</label><input id="msg" placeholder="Apna sawal likho..." autocomplete="off" maxlength="1000"><button class="btn" id="sendBtn">Send</button></form></section>
+<aside class="panel"><div class="ri-title" style="font-size:14px">Your plan</div><div class="ri-sub" id="ctxPlan"></div><div class="ri-title" style="font-size:14px;margin-top:18px">Try asking</div><div style="margin-top:10px">${ASKS.map(q => `<button class="ask">${q}</button>`).join('')}</div></aside></div></div>`,
+  mount: root => {
+    const box = root.querySelector('#msgs'), input = root.querySelector('#msg'), btn = root.querySelector('#sendBtn'), history = [];
+    const area = current.length * current.width, plan = { length: current.length, width: current.width, facing: current.facing, area, summary: current.plan ? `${current.plan.config.villa ? 'villa' : (current.plan.config.bhk || '') + ' BHK'}` : '' };
+    root.querySelector('#ctxPlan').textContent = `${current.length} × ${current.width} ft · ${current.facing}-facing · ${area} sq ft`;
+    const add = (t, c) => { const d = document.createElement('div'); d.className = 'bubble ' + c; d.textContent = t; box.appendChild(d); box.scrollTop = box.scrollHeight; return d; };
+    const send = async q => {
+      q = q.trim(); if (!q || btn.disabled) return;
+      add(q, 'me'); btn.disabled = true; const wait = add('…', 'bot');
+      try { const r = await api.chat(q, plan, history); wait.textContent = r.reply; history.push({ role: 'user', text: q }, { role: 'model', text: r.reply }); }
+      catch { wait.textContent = 'Backend is not running. Start it with: uvicorn main:app --reload (inside the backend folder).'; }
+      btn.disabled = false; input.focus();
+    };
+    root.querySelector('#chatForm').addEventListener('submit', e => { e.preventDefault(); const q = input.value; input.value = ''; send(q); });
+    root.querySelectorAll('.ask').forEach(b => b.addEventListener('click', () => send(b.textContent)));
+  } };
 
 // ---------- Projects ----------
-const projects = { html: () => { const l = loadProjects(); return `<div class="wrap page"><div class="row" style="margin:0 0 6px"><h1 class="ptitle">Projects</h1><a class="btn" href="#/design">+ New design</a></div><p class="psub">Designs you saved on this device.</p>
-<div class="pgrid">${l.map(p => `<div class="proj"><button class="del" data-id="${p.id}" aria-label="Delete design">✕</button><a href="#/design" data-open="${p.id}"><div class="th">${p.thumb}</div><div class="bd"><b>${p.villa ? 'Villa' : p.bhk + ' BHK home'}</b><div>${p.length} × ${p.width} ft · ${p.facing}-facing</div><div>${ago(p.savedAt)}</div></div></a></div>`).join('')}
-<a href="#/design" class="empty"><span>+</span>Start a new design</a></div></div>`; },
-  mount: root => {
-    root.querySelectorAll('.del').forEach(b => b.addEventListener('click', () => { removeProject(+b.dataset.id); location.reload(); }));
-    root.querySelectorAll('[data-open]').forEach(a => a.addEventListener('click', () => { const p = loadProjects().find(x => x.id === +a.dataset.open); if (p) Object.assign(current, { length: p.length, width: p.width, facing: p.facing }); }));
+async function allProjects() {
+  let remote = [];
+  try { remote = (await api.projects()).map(p => ({ ...p, savedAt: p.created * 1000, remote: true })); } catch { /* backend off */ }
+  return [...remote, ...loadProjects()];
+}
+const projects = { html: () => `<div class="wrap page"><div class="row" style="margin:0 0 6px"><h1 class="ptitle">Projects</h1><a class="btn" href="#/design">+ New design</a></div><p class="psub">Designs you saved.</p><div class="pgrid" id="pgrid"></div></div>`,
+  mount: async root => {
+    const list = await allProjects(); if (!root.isConnected) return;
+    root.querySelector('#pgrid').innerHTML = list.map(p => `<div class="proj"><button class="del" data-id="${p.id}" data-remote="${p.remote ? 1 : 0}" aria-label="Delete design">✕</button><a href="#/design" data-open="${p.id}"><div class="th">${p.thumb}</div><div class="bd"><b>${p.villa ? 'Villa' : p.bhk + ' BHK home'}</b><div>${p.length} × ${p.width} ft · ${p.facing}-facing</div><div>${ago(p.savedAt)}</div></div></a></div>`).join('') + `<a href="#/design" class="empty"><span>+</span>Start a new design</a>`;
+    root.querySelectorAll('.del').forEach(b => b.addEventListener('click', async () => { if (b.dataset.remote === '1') { try { await api.deleteProject(+b.dataset.id); } catch { /* ignore */ } } else removeProject(+b.dataset.id); b.closest('.proj').remove(); }));
+    root.querySelectorAll('[data-open]').forEach(a => a.addEventListener('click', () => { const p = list.find(x => String(x.id) === a.dataset.open); if (p) Object.assign(current, { length: p.length, width: p.width, facing: p.facing }); }));
   } };
 
 export const routes = { home, design, estimate, assistant, projects };

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "check": "node tests/full-check.js"
+    "check": "node tests/full-check.js",
+    "fixtures": "node tests/make-fixtures.mjs"
   },
   "devDependencies": {
     "vite": "^7.0.0",

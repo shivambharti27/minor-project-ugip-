@@ -1,7 +1,8 @@
 import { current } from '../state.js';
 import { planHome } from '../engine/planner.js';
 import { computeDoors } from '../engine/doors.js';
-import { estimate } from '../estimate/engine.js';
+import { measurePlan, estimateFromMeasurements } from '../estimate/engine.js';
+import { api } from '../api.js';
 import { BASE_RATES, GRADE_RATES, PRESETS } from '../estimate/rates.js';
 
 const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
@@ -13,12 +14,14 @@ const RATE_LABELS = { cement: 'Cement (₹/bag)', steel: 'Steel (₹/kg)', brick
   paintIn: 'Interior paint (₹/litre)', paintOut: 'Exterior paint (₹/litre)', electrical: 'Electrical (₹/sq ft)', plumbBath: 'Plumbing per bathroom (₹)', plumbKitchen: 'Plumbing, kitchen (₹)', plumbBase: 'Water supply & drainage (₹)' };
 
 const labour = () => state.labour ?? PRESETS[state.preset].labourPerSqft;
-function compute() {
+async function compute() {
   const { length, width, facing } = current;
-  const plan = current.plan && current.plan.layout.issues.length === 0 && current.plan.length === undefined ? current.plan : planHome(length, width, facing, 0);
+  const plan = current.plan && current.plan.layout.issues.length === 0 ? current.plan : planHome(length, width, facing, 0);
   if (plan.layout.issues.length) return { error: true };
-  const doors = computeDoors(plan.layout, length, width, facing);
-  return { plan, est: estimate(plan.layout, doors, { floors: state.floors, grade: state.grade, miscPct: state.misc, labourPerSqft: labour(), rates: { ...PRESETS[state.preset].rates, ...state.over } }) };
+  const m = measurePlan(plan.layout, computeDoors(plan.layout, length, width, facing));
+  const options = { floors: state.floors, grade: state.grade, miscPct: state.misc, labourPerSqft: labour(), rates: { ...PRESETS[state.preset].rates, ...state.over } };
+  try { return { plan, est: await api.estimate(m, options), source: 'server' }; }
+  catch { return { plan, est: estimateFromMeasurements(m, options), source: 'browser' }; }
 }
 
 function body(r) {
@@ -74,10 +77,13 @@ export const page = {
     const MAIN = [['cement', 'Cement (₹/50 kg bag)'], ['steel', 'TMT steel (₹/kg)'], ['brick', 'Red bricks (₹/pc)'], ['sand', 'Sand (₹/cu ft)'], ['aggregate', 'Aggregate (₹/cu ft)'], ['labour', 'Labour (₹/sq ft)']];
     let last = null;
     const eff = () => ({ ...BASE_RATES, ...PRESETS[state.preset].rates, ...GRADE_RATES[state.grade], ...state.over });
-    const run = () => {
-      last = compute();
+    let seq = 0;
+    const run = async () => {
+      const mine = ++seq, r = await compute();
+      if (mine !== seq || !root.isConnected) return;   // a newer request or another page took over
+      last = r;
       $('#estBody').innerHTML = body(last);
-      $('#estSub').textContent = `Based on your plot: ${current.length} × ${current.width} ft, ${({ N: 'North', S: 'South', E: 'East', W: 'West' })[current.facing]}-facing. Change the plot on the Design page.`;
+      $('#estSub').textContent = `Based on your plot: ${current.length} × ${current.width} ft, ${({ N: 'North', S: 'South', E: 'East', W: 'West' })[current.facing]}-facing. Change the plot on the Design page.` + (r.source ? (r.source === 'server' ? ' Calculated by the Python backend.' : ' Backend not running, so this was calculated in your browser.') : '');
     };
     const field = ([k, label]) => `<label>${label}<input class="field" type="number" min="0" data-k="${k}" value="${k === 'labour' ? labour() : eff()[k]}"></label>`;
     const fillRates = () => {
